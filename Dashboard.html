@@ -119,6 +119,7 @@
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
           <span class="save-indicator" id="saveIndicator">✓ Đã lưu tự động</span>
           <button class="action-btn" style="background:rgba(15,118,110,.1);color:var(--accent2);border-color:var(--accent2);padding:9px 18px;font-size:12px;min-height:38px" onclick="exportToExcel()">📊 Xuất Excel</button>
+          <button class="action-btn" style="background:var(--accent-soft);color:var(--accent);border-color:var(--accent);padding:9px 18px;font-size:12px;min-height:38px" onclick="openSnapshotModal()">📌 Chốt mốc báo cáo</button>
           <button class="action-btn btn-save" onclick="saveData()">💾 Lưu dữ liệu</button>
           <button class="action-btn btn-reset" onclick="resetData()">↺ Reset mặc định</button>
           <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:18px;flex-shrink:0" aria-hidden="true">G</div>
@@ -139,6 +140,22 @@
       <div id="tab-dashboard" class="tab-content active" style="background:var(--card);border:1px solid var(--border);border-top:none;border-radius:0 0 16px 16px;padding:28px;">
         <h3 style="font-family:'Cormorant Garamond',serif;font-size:22px;font-weight:600;color:var(--text);margin:0 0 18px">Chỉ số KPI chính</h3>
         <div class="kpi-grid" id="kpiCards"></div>
+
+        <div id="historyWrap" style="display:none;margin-bottom:24px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;flex-wrap:wrap;gap:10px;">
+            <h4 style="font-weight:600;color:var(--text);font-size:15px;margin:0">So sánh giữa các lần báo cáo</h4>
+            <span style="font-size:11px;color:var(--muted)">Bấm "📌 Chốt mốc báo cáo" ở trên để lưu một mốc số liệu mới</span>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="historyTable">
+              <thead>
+                <tr><th>Mốc báo cáo</th><th>Ngày lưu</th><th>Đi xem</th><th>Khách quan tâm</th><th>Số lead</th><th>Tổng ngân sách</th><th>Tổng chi phí</th><th>CPL TB</th><th></th></tr>
+              </thead>
+              <tbody id="historyBody"></tbody>
+            </table>
+          </div>
+        </div>
+
         <div class="grid-2col" style="margin-bottom:24px;">
           <div class="panel" style="background:var(--bg);border:1px solid var(--border);">
             <h4 style="font-weight:600;color:var(--text);font-size:15px;margin:0 0 12px">Phân bổ chi phí theo kênh</h4>
@@ -290,6 +307,20 @@
   </div>
 </div>
 
+<div class="modal-overlay" id="snapshotModal">
+  <div class="modal-box">
+    <h3 class="modal-title">📌 Chốt mốc báo cáo</h3>
+    <div class="modal-body">
+      Lưu lại toàn bộ số liệu hiện tại (Đi xem, Khách quan tâm, Số lead, Ngân sách, Chi phí) làm một mốc để so sánh với các lần báo cáo sau.
+      <input type="text" id="snapshotLabelInput" class="modal-input" placeholder="VD: Báo cáo tháng 9/2026" onkeydown="if(event.key==='Enter'){saveSnapshot();}">
+    </div>
+    <div class="modal-actions">
+      <button class="modal-btn modal-btn-cancel" onclick="closeSnapshotModal()">Hủy</button>
+      <button class="modal-btn modal-btn-primary" onclick="saveSnapshot()">Lưu mốc</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-overlay" id="confirmModal">
   <div class="modal-box">
     <h3 class="modal-title" id="confirmTitle">Xác nhận</h3>
@@ -322,14 +353,15 @@ var defaultData = {
   leads: [
     {id: 'KH-001', date: '01/09/2026', channel: 'Hotline', name: 'Thanh Hồng', contact: '0862086689', budget: '', area: '', region: '', details: 'Cty luật FDI, tìm văn phòng ảo', pic: 'Chưa phân công', status: 'Chưa chuyển', note: ''},
     {id: 'KH-002', date: '04/09/2026', channel: 'Zalo OA', name: 'Đức Anh', contact: '0364285599', budget: '', area: '', region: '', details: 'nhu cầu mặt bằng 150m2. Trường chinh', pic: 'Uyên', status: 'PKD đã tiếp nhận', note: '- hẹn 10h sáng ngày 5/9 qua xe. về tổng thể diện tích giá cả ok nhưng đến cuối năm khách mới cần chuyển vào.'}
-  ]
+  ],
+  history: []
 };
 
 var data = JSON.parse(JSON.stringify(defaultData));
 var charts = {};
 var saveTimeout = null;
 var leadFilterText = '';
-var DATA_KEY = 'gems_dashboard_data_v6';
+var DATA_KEY = 'gems_dashboard_data_v7';
 
 const sourceOptions = ['Facebook Ads', 'Zalo OA', 'Google Ads', 'SEO', 'Website/Landing page', 'Sự kiện', 'Môi Giới', 'Hotline', 'Khác', 'TikTok', 'FB'];
 const leadStatusOptions = ['Chưa chuyển', 'Đã chuyển PKD', 'PKD đã tiếp nhận'];
@@ -354,33 +386,116 @@ function executeConfirmAction() {
 function showImportModal() { document.getElementById('importModal').classList.add('active'); }
 function closeImportModal() { document.getElementById('importModal').classList.remove('active'); document.getElementById('csvTextInput').value = ''; }
 
-// ============== LƯU TRỮ (persistent per-user storage) ==============
-async function loadData() {
+// ============== LƯU TRỮ (localStorage của trình duyệt — lưu thật, không mất khi tải lại trang) ==============
+function loadData() {
   try {
-    var saved = await window.storage.get(DATA_KEY, false);
-    if (saved && saved.value) data = JSON.parse(saved.value);
+    var raw = localStorage.getItem(DATA_KEY);
+    if (raw) {
+      var parsed = JSON.parse(raw);
+      if (!parsed.history) parsed.history = [];
+      data = parsed;
+    }
+    var savedAt = localStorage.getItem(DATA_KEY + '_savedAt');
+    if (savedAt) {
+      var d = new Date(savedAt);
+      document.getElementById('lastUpdated').textContent = '· Cập nhật lần cuối: ' + d.toLocaleString('vi-VN', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'});
+    }
   } catch (e) {
-    // Chưa có dữ liệu lưu trước đó — dùng dữ liệu mặc định.
+    // Chưa có dữ liệu lưu trước đó, hoặc trình duyệt chặn localStorage — dùng dữ liệu mặc định.
   }
 }
-async function saveData() {
+function saveData() {
   try {
-    var result = await window.storage.set(DATA_KEY, JSON.stringify(data), false);
-    if (result) { showIndicator(); updateLastSaved(); }
-    else { showToast('Lỗi lưu dữ liệu', true); }
-  } catch (e) { showToast('Lỗi lưu dữ liệu', true); }
+    localStorage.setItem(DATA_KEY, JSON.stringify(data));
+    localStorage.setItem(DATA_KEY + '_savedAt', new Date().toISOString());
+    showIndicator(); updateLastSaved();
+  } catch (e) { showToast('Lỗi lưu dữ liệu (trình duyệt có thể đang chặn localStorage)', true); }
 }
 function autoSave() {
   clearTimeout(saveTimeout);
   saveTimeout = setTimeout(function() { saveData(); updateCharts(); }, 600);
 }
 function resetData() {
-  confirmAction('Reset dữ liệu', 'Bạn có chắc muốn reset về dữ liệu mặc định? Tất cả thay đổi sẽ bị mất.', async function() {
+  confirmAction('Reset dữ liệu', 'Bạn có chắc muốn reset về dữ liệu mặc định? Tất cả thay đổi và các mốc báo cáo đã lưu sẽ bị mất.', function() {
     data = JSON.parse(JSON.stringify(defaultData));
-    try { await window.storage.delete(DATA_KEY, false); } catch (e) {}
+    try { localStorage.removeItem(DATA_KEY); localStorage.removeItem(DATA_KEY + '_savedAt'); } catch (e) {}
     renderAll(); updateCharts();
     document.getElementById('lastUpdated').textContent = '· Chưa lưu lần nào';
     showToast('Đã reset về mặc định', false);
+  });
+}
+
+// ============== MỐC SO SÁNH BÁO CÁO (lưu snapshot số liệu theo từng lần chốt) ==============
+function computeSnapshotTotals() {
+  var totalBudget = 0, totalSpent = 0, totalLeadsCh = 0;
+  data.channels.forEach(function(ch) { totalBudget += ch.budget; totalSpent += ch.spent; totalLeadsCh += ch.leads; });
+  return {
+    visits: data.stats.visits,
+    interested: data.stats.interested,
+    leadCount: data.leads.length,
+    channelLeads: totalLeadsCh,
+    totalBudget: totalBudget,
+    totalSpent: totalSpent
+  };
+}
+function openSnapshotModal() {
+  var input = document.getElementById('snapshotLabelInput');
+  input.value = 'Báo cáo ' + new Date().toLocaleDateString('vi-VN');
+  document.getElementById('snapshotModal').classList.add('active');
+  setTimeout(function() { input.focus(); input.select(); }, 50);
+}
+function closeSnapshotModal() { document.getElementById('snapshotModal').classList.remove('active'); }
+function saveSnapshot() {
+  var label = document.getElementById('snapshotLabelInput').value.trim();
+  if (!label) { alert('Vui lòng nhập tên cho mốc báo cáo này.'); return; }
+  if (!data.history) data.history = [];
+  var totals = computeSnapshotTotals();
+  totals.label = label;
+  totals.date = new Date().toISOString();
+  data.history.push(totals);
+  saveData();
+  renderHistory();
+  closeSnapshotModal();
+  showToast('Đã lưu mốc báo cáo "' + label + '"', false);
+}
+function deleteSnapshot(idx) {
+  confirmAction('Xóa mốc báo cáo', 'Xóa mốc "' + data.history[idx].label + '"?', function() {
+    data.history.splice(idx, 1); saveData(); renderHistory();
+  });
+}
+function renderHistory() {
+  var wrap = document.getElementById('historyWrap');
+  if (!wrap) return;
+  var tbody = document.getElementById('historyBody');
+  if (!data.history || data.history.length === 0) {
+    wrap.style.display = 'none';
+    return;
+  }
+  wrap.style.display = 'block';
+  tbody.innerHTML = '';
+  data.history.forEach(function(h, idx) {
+    var cpl = h.channelLeads > 0 ? Math.round(h.totalSpent / h.channelLeads) : 0;
+    var prev = idx > 0 ? data.history[idx - 1] : null;
+    function delta(cur, prevVal) {
+      if (!prev) return '';
+      var diff = cur - prevVal;
+      if (diff === 0) return ' <span style="color:var(--muted)">(=)</span>';
+      var sign = diff > 0 ? '+' : '';
+      var color = diff > 0 ? 'var(--accent2)' : 'var(--danger)';
+      return ' <span style="color:' + color + ';font-size:11px">(' + sign + diff.toLocaleString('vi-VN') + ')</span>';
+    }
+    var dateStr = new Date(h.date).toLocaleDateString('vi-VN');
+    var tr = document.createElement('tr');
+    tr.innerHTML = '<td style="font-weight:600">' + h.label + '</td>' +
+      '<td>' + dateStr + '</td>' +
+      '<td>' + h.visits.toLocaleString('vi-VN') + (prev ? delta(h.visits, prev.visits) : '') + '</td>' +
+      '<td>' + h.interested.toLocaleString('vi-VN') + (prev ? delta(h.interested, prev.interested) : '') + '</td>' +
+      '<td style="color:var(--accent2);font-weight:600">' + h.leadCount.toLocaleString('vi-VN') + (prev ? delta(h.leadCount, prev.leadCount) : '') + '</td>' +
+      '<td>' + h.totalBudget.toLocaleString('vi-VN') + '</td>' +
+      '<td style="font-weight:600">' + h.totalSpent.toLocaleString('vi-VN') + (prev ? delta(h.totalSpent, prev.totalSpent) : '') + '</td>' +
+      '<td>' + (cpl > 0 ? cpl.toLocaleString('vi-VN') : '—') + '</td>' +
+      '<td><button class="action-btn btn-del" onclick="deleteSnapshot(' + idx + ')">✕</button></td>';
+    tbody.appendChild(tr);
   });
 }
 function showToast(msg, isError) {
@@ -902,7 +1017,7 @@ function switchTab(evt, tabName) {
   setTimeout(function() { Object.values(charts).forEach(c => c && c.resize()); }, 80);
 }
 
-function renderAll() { renderKPIs(); renderChannels(); renderSEO(); renderFBCampaigns(); renderGGCampaigns(); renderLeads(); }
+function renderAll() { renderKPIs(); renderChannels(); renderSEO(); renderFBCampaigns(); renderGGCampaigns(); renderLeads(); renderHistory(); }
 function waitForECharts(n, cb) {
   if (typeof echarts === 'undefined') { if (n < 40) setTimeout(() => waitForECharts(n+1, cb), 250); return; }
   cb();
