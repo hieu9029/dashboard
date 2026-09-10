@@ -362,6 +362,8 @@ var charts = {};
 var saveTimeout = null;
 var leadFilterText = '';
 var DATA_KEY = 'gems_dashboard_data_v7';
+var API_URL = 'https://script.google.com/macros/s/AKfycbyjQmmdfkgoAWeNizrcpxPfJcDUKA81nH3QcyEwlAdGkYRoCPutSf6-AzhRFM1GUmxsJg/exec';
+var API_TOKEN = 'gems-office-2026-6f9k2';
 
 const sourceOptions = ['Facebook Ads', 'Zalo OA', 'Google Ads', 'SEO', 'Website/Landing page', 'Sự kiện', 'Môi Giới', 'Hotline', 'Khác', 'TikTok', 'FB'];
 const leadStatusOptions = ['Chưa chuyển', 'Đã chuyển PKD', 'PKD đã tiếp nhận'];
@@ -386,39 +388,72 @@ function executeConfirmAction() {
 function showImportModal() { document.getElementById('importModal').classList.add('active'); }
 function closeImportModal() { document.getElementById('importModal').classList.remove('active'); document.getElementById('csvTextInput').value = ''; }
 
-// ============== LƯU TRỮ (localStorage của trình duyệt — lưu thật, không mất khi tải lại trang) ==============
-function loadData() {
+// ============== LƯU TRỮ (Google Sheets qua Apps Script API — dùng chung cho cả nhóm, đa thiết bị) ==============
+// localStorage chỉ dùng làm cache tạm/offline fallback, không phải nguồn dữ liệu chính.
+async function loadData() {
+  var usedApi = false;
   try {
-    var raw = localStorage.getItem(DATA_KEY);
-    if (raw) {
-      var parsed = JSON.parse(raw);
+    var res = await fetch(API_URL, {method: 'GET'});
+    var text = await res.text();
+    var parsed = JSON.parse(text);
+    if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
       if (!parsed.history) parsed.history = [];
       data = parsed;
+      usedApi = true;
+      try { localStorage.setItem(DATA_KEY, JSON.stringify(data)); } catch (e) {}
     }
+  } catch (e) {
+    // Không gọi được API (offline, mạng chặn...) — thử dùng cache localStorage bên dưới.
+  }
+  if (!usedApi) {
+    try {
+      var raw = localStorage.getItem(DATA_KEY);
+      if (raw) {
+        var cached = JSON.parse(raw);
+        if (!cached.history) cached.history = [];
+        data = cached;
+        showToast('Không kết nối được server, đang dùng dữ liệu lưu tạm trên máy', true);
+      }
+    } catch (e) {}
+  }
+  try {
     var savedAt = localStorage.getItem(DATA_KEY + '_savedAt');
     if (savedAt) {
       var d = new Date(savedAt);
       document.getElementById('lastUpdated').textContent = '· Cập nhật lần cuối: ' + d.toLocaleString('vi-VN', {day:'2-digit', month:'2-digit', year:'numeric', hour:'2-digit', minute:'2-digit'});
     }
-  } catch (e) {
-    // Chưa có dữ liệu lưu trước đó, hoặc trình duyệt chặn localStorage — dùng dữ liệu mặc định.
-  }
+  } catch (e) {}
 }
-function saveData() {
+async function saveData() {
   try {
     localStorage.setItem(DATA_KEY, JSON.stringify(data));
-    localStorage.setItem(DATA_KEY + '_savedAt', new Date().toISOString());
-    showIndicator(); updateLastSaved();
-  } catch (e) { showToast('Lỗi lưu dữ liệu (trình duyệt có thể đang chặn localStorage)', true); }
+  } catch (e) {}
+  try {
+    var res = await fetch(API_URL, {
+      method: 'POST',
+      headers: {'Content-Type': 'text/plain;charset=utf-8'},
+      body: JSON.stringify({token: API_TOKEN, data: data})
+    });
+    var result = await res.json();
+    if (result && result.ok) {
+      localStorage.setItem(DATA_KEY + '_savedAt', new Date().toISOString());
+      showIndicator(); updateLastSaved();
+    } else {
+      showToast('Lỗi lưu lên server: ' + (result && result.error ? result.error : 'không rõ'), true);
+    }
+  } catch (e) {
+    showToast('Không kết nối được server để lưu (đã lưu tạm trên máy)', true);
+  }
 }
 function autoSave() {
   clearTimeout(saveTimeout);
   saveTimeout = setTimeout(function() { saveData(); updateCharts(); }, 600);
 }
 function resetData() {
-  confirmAction('Reset dữ liệu', 'Bạn có chắc muốn reset về dữ liệu mặc định? Tất cả thay đổi và các mốc báo cáo đã lưu sẽ bị mất.', function() {
+  confirmAction('Reset dữ liệu', 'Bạn có chắc muốn reset về dữ liệu mặc định? Tất cả thay đổi và các mốc báo cáo đã lưu (kể cả trên server) sẽ bị mất.', function() {
     data = JSON.parse(JSON.stringify(defaultData));
     try { localStorage.removeItem(DATA_KEY); localStorage.removeItem(DATA_KEY + '_savedAt'); } catch (e) {}
+    saveData();
     renderAll(); updateCharts();
     document.getElementById('lastUpdated').textContent = '· Chưa lưu lần nào';
     showToast('Đã reset về mặc định', false);
