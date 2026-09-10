@@ -83,7 +83,7 @@
     .toast{position:fixed;bottom:24px;right:24px;padding:12px 20px;border-radius:10px;background:var(--accent2);color:#fff;font-weight:600;font-size:13px;z-index:9999;transform:translateY(100px);opacity:0;transition:transform .3s ease,opacity .3s ease;box-shadow:0 8px 28px rgba(20,20,30,.18)}
     .toast.show{transform:translateY(0);opacity:1}
     .toast.error{background:var(--danger);color:#fff}
-    
+
     /* MODAL STYLES */
     .modal-overlay {position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);display:none;align-items:center;justify-content:center;z-index:9999;backdrop-filter:blur(2px);}
     .modal-overlay.active {display:flex;}
@@ -124,7 +124,7 @@
           <div style="width:44px;height:44px;border-radius:12px;background:linear-gradient(135deg,var(--accent),var(--accent2));display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:18px;flex-shrink:0" aria-hidden="true">G</div>
         </div>
       </div>
-      
+
       <!-- TAB NAVIGATION -->
       <div class="tabs-wrap">
         <div style="display:flex;gap:4px;border-bottom:1px solid var(--border);margin-bottom:0;flex-wrap:nowrap;overflow-x:auto;padding-bottom:1px;">
@@ -329,7 +329,7 @@ var data = JSON.parse(JSON.stringify(defaultData));
 var charts = {};
 var saveTimeout = null;
 var leadFilterText = '';
-var DATA_KEY = 'gems_dashboard_data_v6'; 
+var DATA_KEY = 'gems_dashboard_data_v6';
 
 const sourceOptions = ['Facebook Ads', 'Zalo OA', 'Google Ads', 'SEO', 'Website/Landing page', 'Sự kiện', 'Môi Giới', 'Hotline', 'Khác', 'TikTok', 'FB'];
 const leadStatusOptions = ['Chưa chuyển', 'Đã chuyển PKD', 'PKD đã tiếp nhận'];
@@ -636,9 +636,9 @@ function renderLeads() {
   tbody.innerHTML = '';
   var q = leadFilterText.toLowerCase();
   var filtered = data.leads.map((l,i)=>({l,i})).filter(x => (x.l.name + x.l.details + x.l.id + x.l.region).toLowerCase().includes(q));
-  
+
   if (filtered.length === 0) return tbody.innerHTML = emptyRow(14, 'Không có Lead', ''); // Updated colspan
-  
+
   filtered.forEach(({l, i}, index) => {
     var tr = document.createElement('tr');
     tr.innerHTML = `
@@ -717,7 +717,7 @@ function processImport() {
     const rows = parseCSV(csv).filter(r => r.length > 1 || (r.length === 1 && r[0].trim() !== ''));
 
     if (rows.length < 2) throw new Error('Empty');
-    
+
     const headers = rows[0].map(h => h.trim().toLowerCase());
     const getColIndex = (keywords) => {
       for (let i = 0; i < headers.length; i++) {
@@ -743,10 +743,10 @@ function processImport() {
     for(let i = 1; i < rows.length; i++) {
       if(rows[i].length < 2 || !rows[i][cId] || rows[i][cId].trim() === "") continue;
       const val = (idx, defaultVal) => (idx !== -1 && rows[i][idx] !== undefined && rows[i][idx].trim() !== "") ? rows[i][idx].trim() : defaultVal;
-      
+
       let rawSource = val(cSource, 'Khác');
       let matchedSource = sourceOptions.find(opt => opt.toLowerCase() === rawSource.toLowerCase()) || 'Khác';
-      
+
       let rawPic = val(cPic, 'Chưa phân công');
       let matchedPic = picOptions.find(opt => opt.toLowerCase() === rawPic.toLowerCase()) || 'Chưa phân công';
 
