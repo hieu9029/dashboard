@@ -369,6 +369,30 @@ var API_TOKEN = 'e63c694873299e58771d4df3ea917d164378e15a675bb2aa';
 // cùng lúc khiến 1 tab cũ ghi đè mất dữ liệu tab khác vừa lưu (nguyên nhân mất dữ liệu SEO).
 var dirtySections = {};
 function markDirty(section) { if (section) dirtySections[section] = true; }
+// Bản dữ liệu mới nhất từ server mà tab này biết được (cập nhật khi tải trang, làm mới nền,
+// và sau mỗi lần lưu thành công). Dùng làm nguồn "bù" cho các phần chưa sửa khi lưu, để không
+// phải chờ gọi API sống (rất chậm, 8-15s) trong lúc lưu — giảm nguy cơ lưu bị lỗi mạng.
+var lastServerSnapshot = null;
+async function fetchWithTimeout(url, opts, timeoutMs) {
+  var controller = new AbortController();
+  var timer = setTimeout(function() { controller.abort(); }, timeoutMs);
+  try {
+    return await fetch(url, Object.assign({}, opts, {signal: controller.signal}));
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function refreshServerSnapshot() {
+  try {
+    var res = await fetchWithTimeout(API_URL, {method: 'GET', cache: 'no-store'}, 15000);
+    var parsed = JSON.parse(await res.text());
+    if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
+      lastServerSnapshot = parsed;
+    }
+  } catch (e) {
+    // Làm mới nền thất bại (offline, mạng chậm...) — bỏ qua, giữ bản cũ.
+  }
+}
 function sectionFromId(id) {
   if (!id) return null;
   if (id.indexOf('stat-') === 0) return 'stats';
@@ -415,6 +439,7 @@ async function loadData() {
       if (!parsed.history) parsed.history = [];
       data = parsed;
       usedApi = true;
+      lastServerSnapshot = JSON.parse(JSON.stringify(parsed));
       try { localStorage.setItem(DATA_KEY, JSON.stringify(data)); } catch (e) {}
     }
   } catch (e) {
@@ -444,29 +469,37 @@ async function saveData() {
   try {
     localStorage.setItem(DATA_KEY, JSON.stringify(data));
   } catch (e) {}
-  // Trước khi lưu: tải bản mới nhất từ server và chỉ giữ lại các phần (channels/seo/fbCampaigns/...)
-  // mà TAB này thực sự vừa sửa (dirtySections). Các phần khác lấy theo bản mới nhất trên server,
-  // để tránh 1 tab/thiết bị cũ ghi đè mất dữ liệu mà tab/thiết bị khác vừa lưu.
+  // Trước khi lưu: chỉ giữ lại các phần (channels/seo/fbCampaigns/...) mà TAB này thực sự vừa
+  // sửa (dirtySections). Các phần khác lấy theo bản server mới nhất mà tab này biết được
+  // (lastServerSnapshot — làm mới định kỳ ở nền, xem refreshServerSnapshot), để tránh 1
+  // tab/thiết bị cũ ghi đè mất dữ liệu mà tab/thiết bị khác vừa lưu.
+  // Thử lấy thêm 1 bản mới nhất trực tiếp (chờ tối đa 4s) để chính xác hơn — nhưng KHÔNG để
+  // việc này làm chậm/thất bại toàn bộ thao tác lưu nếu server phản hồi chậm (server có thể
+  // mất 8-15s), vì vậy có giới hạn thời gian chờ và luôn có lastServerSnapshot dự phòng.
   try {
-    var resLatest = await fetch(API_URL, {method: 'GET', cache: 'no-store'});
+    var resLatest = await fetchWithTimeout(API_URL, {method: 'GET', cache: 'no-store'}, 4000);
     var latest = JSON.parse(await resLatest.text());
-    if (latest && typeof latest === 'object') {
-      Object.keys(latest).forEach(function(key) {
-        if (!dirtySections[key]) data[key] = latest[key];
-      });
+    if (latest && typeof latest === 'object' && Object.keys(latest).length > 0) {
+      lastServerSnapshot = latest;
     }
   } catch (e) {
-    // Không lấy được bản mới nhất (offline...) — vẫn lưu bằng dữ liệu hiện có của tab này.
+    // Không kịp lấy bản mới nhất trong 4s (mạng chậm...) — dùng bản đã biết gần nhất bên dưới.
+  }
+  if (lastServerSnapshot) {
+    Object.keys(lastServerSnapshot).forEach(function(key) {
+      if (!dirtySections[key]) data[key] = lastServerSnapshot[key];
+    });
   }
   try {
-    var res = await fetch(API_URL, {
+    var res = await fetchWithTimeout(API_URL, {
       method: 'POST',
       headers: {'Content-Type': 'text/plain;charset=utf-8'},
       body: JSON.stringify({token: API_TOKEN, data: data})
-    });
+    }, 20000);
     var result = await res.json();
     if (result && result.ok) {
       dirtySections = {};
+      lastServerSnapshot = JSON.parse(JSON.stringify(data));
       localStorage.setItem(DATA_KEY + '_savedAt', new Date().toISOString());
       showIndicator(); updateLastSaved();
     } else {
@@ -627,7 +660,6 @@ function parseVNNumber(raw) {
   var n = parseFloat(numPart);
   return isNaN(n) ? 0 : Math.round(n * mult);
 }
-
 function makeEditable(cell, value, onUpdate, isNum, formatFn) {
   cell.innerHTML = '';
   cell.setAttribute('contenteditable', 'true');
@@ -1140,6 +1172,13 @@ document.addEventListener('keydown', function(e) {
 
 window.onload = async function() {
   await loadData(); renderAll(); waitForECharts(0, initCharts);
+  // Làm mới ngầm bản dữ liệu server đã biết mỗi 30s và mỗi khi quay lại tab, để khi có
+  // nhiều tab/thiết bị cùng mở, việc lưu ở mỗi tab luôn bù theo bản khá mới mà không phải
+  // chờ gọi API (chậm) ngay trong lúc lưu.
+  setInterval(refreshServerSnapshot, 30000);
+  document.addEventListener('visibilitychange', function() {
+    if (!document.hidden) refreshServerSnapshot();
+  });
 };
 </script>
 </body>
