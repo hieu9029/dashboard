@@ -564,17 +564,46 @@ function placeCaretAtEnd(el) {
     sel.addRange(range);
   }
 }
+function parseVNNumber(raw) {
+  if (raw == null) return 0;
+  var str = String(raw).trim().toLowerCase();
+  var m = str.match(/^(-?[\d.,]+)\s*(triệu|trieu|tr|nghìn|nghin|k)?/);
+  if (!m || !m[1]) {
+    return parseFloat(str.replace(/[^0-9.-]/g, '')) || 0;
+  }
+  var numPart = m[1];
+  var suffix = m[2] || '';
+  var mult = 1;
+  if (suffix === 'triệu' || suffix === 'trieu' || suffix === 'tr') mult = 1000000;
+  else if (suffix === 'nghìn' || suffix === 'nghin' || suffix === 'k') mult = 1000;
+  var hasComma = numPart.indexOf(',') > -1;
+  var hasDot = numPart.indexOf('.') > -1;
+  if (hasComma && hasDot) {
+    numPart = numPart.replace(/\./g, '').replace(',', '.');
+  } else if (hasComma) {
+    var parts = numPart.split(',');
+    numPart = parts[parts.length - 1].length <= 2 ? parts.slice(0, -1).join('') + '.' + parts[parts.length - 1] : numPart.replace(/,/g, '');
+  } else if (hasDot) {
+    var dotParts = numPart.split('.');
+    if (dotParts.length > 2 || dotParts[dotParts.length - 1].length === 3) {
+      numPart = numPart.replace(/\./g, '');
+    }
+  }
+  var n = parseFloat(numPart);
+  return isNaN(n) ? 0 : Math.round(n * mult);
+}
+
 function makeEditable(cell, value, onUpdate, isNum, formatFn) {
   cell.innerHTML = '';
   cell.setAttribute('contenteditable', 'true');
   cell.textContent = value;
   cell.addEventListener('input', function() {
-    var val = isNum ? parseFloat(this.textContent.replace(/[^0-9.-]/g, '')) || 0 : this.textContent;
+    var val = isNum ? parseVNNumber(this.textContent) : this.textContent;
     onUpdate(val); autoSave();
   });
   cell.addEventListener('blur', function() {
     if (isNum) {
-      var n = parseFloat(this.textContent.replace(/[^0-9.-]/g, '')) || 0;
+      var n = parseVNNumber(this.textContent);
       this.textContent = formatFn ? formatFn(n) : (n >= 1000000 ? (n / 1000000).toFixed(1).replace('.0', '') + 'M' : n.toLocaleString('vi-VN'));
     }
   });
